@@ -77,7 +77,7 @@ func main() {
 
 	// The neural network is the attention model from attention is all you need
 	l1 := tf32.ReLu(tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1")))
-	cost := tf32.Entropy(tf32.Softmax(l1))
+	cost := tf32.Entropy(tf32.Softmax(tf32.T(tf32.Mul(tf32.Softmax(l1), tf32.T(set.Get("w1"))))))
 
 	points := make(plotter.XYs, 0, 8)
 
