@@ -65,8 +65,9 @@ func main() {
 			}
 			continue
 		}
+		factor := math.Sqrt(2.0 / float64(w.S[0]))
 		for i := 0; i < cap(w.X); i++ {
-			w.X = append(w.X, float32((2*rnd.Float64() - 1)))
+			w.X = append(w.X, float32(rnd.Float64()*factor))
 		}
 		w.States = make([][]float32, StateTotal)
 		for i := range w.States {
