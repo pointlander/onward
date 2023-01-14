@@ -81,9 +81,14 @@ func main() {
 	points := make(plotter.XYs, 0, 8)
 
 	// The stochastic gradient descent loop
-	for i < 256 {
-		inputs.X[0] = float32(rnd.Intn(2))
-		inputs.X[1] = float32(rnd.Intn(2))
+	for i < 1024 {
+		if i&1 == 1 {
+			inputs.X[0] = float32(rnd.Intn(2))
+			inputs.X[1] = float32(rnd.Intn(2))
+		} else {
+			inputs.X[0] = float32(.5 + rnd.NormFloat64())
+			inputs.X[1] = float32(.5 + rnd.NormFloat64())
+		}
 
 		start := time.Now()
 		// Calculate the gradients
@@ -100,7 +105,11 @@ func main() {
 				w.States[StateV][k] = v
 				mhat := m / (1 - b1)
 				vhat := v / (1 - b2)
-				set.Weights[j].X[k] -= Eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
+				if i&1 == 1 {
+					set.Weights[j].X[k] -= Eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
+				} else {
+					set.Weights[j].X[k] += .5 * Eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
+				}
 			}
 		}
 
@@ -117,6 +126,21 @@ func main() {
 
 		points = append(points, plotter.XY{X: float64(i), Y: float64(total)})
 		i++
+	}
+
+	data := [][]float32{
+		{0, 0, 0},
+		{0, 1, 1},
+		{1, 0, 1},
+		{1, 1, 0},
+	}
+	for _, example := range data {
+		inputs.X[0] = example[0]
+		inputs.X[1] = example[1]
+		l1(func(a *tf32.V) bool {
+			fmt.Println(example, a.X)
+			return true
+		})
 	}
 
 	// Plot the cost
