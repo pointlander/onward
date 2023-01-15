@@ -36,16 +36,20 @@ const (
 	StateTotal
 )
 
-func main() {
+// EntropyLayer is an auto learning layer
+type EntropyLayer struct {
+	Rnd    *rand.Rand
+	Set    tf32.Set
+	Input  *tf32.V
+	L1     tf32.Meta
+	Cost   tf32.Meta
+	I      float64
+	Points plotter.XYs
+}
+
+// NewEntropyLayer creates a new entropy layer
+func NewEntropyLayer() *EntropyLayer {
 	rnd := rand.New(rand.NewSource(1))
-	i := 1
-	pow := func(x float32) float32 {
-		y := math.Pow(float64(x), float64(i))
-		if math.IsNaN(y) || math.IsInf(y, 0) {
-			return 0
-		}
-		return float32(y)
-	}
 
 	others := tf32.NewSet()
 	others.Add("inputs", 2, 1)
@@ -67,7 +71,7 @@ func main() {
 		}
 		factor := math.Sqrt(2.0 / float64(w.S[0]))
 		for i := 0; i < cap(w.X); i++ {
-			w.X = append(w.X, float32(rnd.Float64()*factor))
+			w.X = append(w.X, float32(rnd.NormFloat64()*factor))
 		}
 		w.States = make([][]float32, StateTotal)
 		for i := range w.States {
@@ -79,54 +83,94 @@ func main() {
 	l1 := tf32.ReLu(tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1")))
 	cost := tf32.Entropy(tf32.Softmax(tf32.T(tf32.Mul(tf32.Softmax(l1), tf32.T(set.Get("w1"))))))
 
-	points := make(plotter.XYs, 0, 8)
+	return &EntropyLayer{
+		Rnd:    rnd,
+		Set:    set,
+		Input:  inputs,
+		L1:     l1,
+		Cost:   cost,
+		Points: make(plotter.XYs, 0, 8),
+	}
+}
 
+// Step steps the layer forward
+func (e *EntropyLayer) Step(sign float64, in []float32) float32 {
+	e.I++
+	i := e.I
+	copy(e.Input.X, in)
+	loss := tf32.Gradient(e.Cost).X[0]
+
+	// Update the point weights with the partial derivatives using adam
+	b1, b2 := float32(math.Pow(B1, i)), float32(math.Pow(float64(B2), i))
+	for j, w := range e.Set.Weights {
+		for k, d := range w.D {
+			g := d
+			m := B1*w.States[StateM][k] + (1-B1)*g
+			v := B2*w.States[StateV][k] + (1-B2)*g*g
+			w.States[StateM][k] = m
+			w.States[StateV][k] = v
+			mhat := m / (1 - b1)
+			vhat := v / (1 - b2)
+			e.Set.Weights[j].X[k] += float32(sign) * Eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
+		}
+	}
+
+	e.Points = append(e.Points, plotter.XY{X: i, Y: float64(loss)})
+
+	return loss
+}
+
+// Save plots and saves the model
+func (e *EntropyLayer) Save() {
+	// Plot the cost
+	p := plot.New()
+
+	p.Title.Text = "epochs vs cost"
+	p.X.Label.Text = "epochs"
+	p.Y.Label.Text = "cost"
+
+	scatter, err := plotter.NewScatter(e.Points)
+	if err != nil {
+		panic(err)
+	}
+	scatter.GlyphStyle.Radius = vg.Length(1)
+	scatter.GlyphStyle.Shape = draw.CircleGlyph{}
+	p.Add(scatter)
+
+	err = p.Save(8*vg.Inch, 8*vg.Inch, "entropy_cost.png")
+	if err != nil {
+		panic(err)
+	}
+
+	e.Set.Save("set.w", 0, 0)
+}
+
+func main() {
+	rnd, sign, inputs := rand.New(rand.NewSource(1)), -1.0, make([]float32, 2)
+	entropy := NewEntropyLayer()
 	// The stochastic gradient descent loop
-	for i < 1024 {
-		if i&1 == 1 {
-			inputs.X[0] = float32(rnd.Intn(2))
-			inputs.X[1] = float32(rnd.Intn(2))
+	for i := 0; i < 64; i++ {
+		if i&1 == 0 {
+			sign = -1
+			inputs[0] = float32(rnd.Intn(2))
+			inputs[1] = float32(rnd.Intn(2))
 		} else {
-			inputs.X[0] = float32(.5 + rnd.NormFloat64())
-			inputs.X[1] = float32(.5 + rnd.NormFloat64())
+			sign = .5
+			inputs[0] = float32(.5 + rnd.NormFloat64())
+			inputs[1] = float32(.5 + rnd.NormFloat64())
 		}
 
 		start := time.Now()
-		// Calculate the gradients
-		total := tf32.Gradient(cost).X[0]
+		// Step the model
+		loss := entropy.Step(sign, inputs)
 
-		// Update the point weights with the partial derivatives using adam
-		b1, b2 := pow(B1), pow(B2)
-		for j, w := range set.Weights {
-			for k, d := range w.D {
-				g := d
-				m := B1*w.States[StateM][k] + (1-B1)*g
-				v := B2*w.States[StateV][k] + (1-B2)*g*g
-				w.States[StateM][k] = m
-				w.States[StateV][k] = v
-				mhat := m / (1 - b1)
-				vhat := v / (1 - b2)
-				if i&1 == 1 {
-					set.Weights[j].X[k] -= Eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
-				} else {
-					set.Weights[j].X[k] += .5 * Eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
-				}
-			}
-		}
-
-		// Housekeeping
 		end := time.Since(start)
-		fmt.Println(i, total, end)
-		set.Zero()
-		others.Zero()
+		fmt.Println(i, loss, end)
 
-		if math.IsNaN(float64(total)) {
-			fmt.Println(total)
+		if math.IsNaN(float64(loss)) {
+			fmt.Println(loss)
 			break
 		}
-
-		points = append(points, plotter.XY{X: float64(i), Y: float64(total)})
-		i++
 	}
 
 	data := [][]float32{
@@ -136,33 +180,13 @@ func main() {
 		{1, 1, 0},
 	}
 	for _, example := range data {
-		inputs.X[0] = example[0]
-		inputs.X[1] = example[1]
-		l1(func(a *tf32.V) bool {
+		entropy.Input.X[0] = example[0]
+		entropy.Input.X[1] = example[1]
+		entropy.L1(func(a *tf32.V) bool {
 			fmt.Println(example, a.X)
 			return true
 		})
 	}
 
-	// Plot the cost
-	p := plot.New()
-
-	p.Title.Text = "epochs vs cost"
-	p.X.Label.Text = "epochs"
-	p.Y.Label.Text = "cost"
-
-	scatter, err := plotter.NewScatter(points)
-	if err != nil {
-		panic(err)
-	}
-	scatter.GlyphStyle.Radius = vg.Length(1)
-	scatter.GlyphStyle.Shape = draw.CircleGlyph{}
-	p.Add(scatter)
-
-	err = p.Save(8*vg.Inch, 8*vg.Inch, "cost.png")
-	if err != nil {
-		panic(err)
-	}
-
-	set.Save("set.w", 0, 0)
+	entropy.Save()
 }
