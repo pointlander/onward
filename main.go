@@ -84,9 +84,8 @@ func NewEntropyLayer(weights []float32) *EntropyLayer {
 	}
 
 	// The neural network is the attention model from attention is all you need
-	x := tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1"))
-	l1 := tf32.TanH(x)
-	cost := tf32.Sum(tf32.Entropy(tf32.Softmax(tf32.T(tf32.Mul(tf32.Softmax(x), tf32.T(set.Get("w1")))))))
+	l1 := tf32.TanH(tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1")))
+	cost := tf32.Sum(tf32.Entropy(tf32.Softmax(tf32.T(tf32.Mul(tf32.Softmax(l1), tf32.T(set.Get("w1")))))))
 
 	return &EntropyLayer{
 		Rnd:    rnd,
@@ -291,7 +290,7 @@ func main() {
 	_ = data
 	_ = rnd
 	// The stochastic gradient descent loop
-	for i := 0; i < 1024; i++ {
+	for i := 0; i < 256; i++ {
 		//example := data[rnd.Intn(4)]
 		if i&1 == 0 {
 			sign = -1
@@ -303,7 +302,7 @@ func main() {
 			targets[2] = 1
 			targets[3] = -1
 		} else {
-			sign = 1
+			sign = .5
 			//inputs[0] = float32(.5 + rnd.NormFloat64())
 			//inputs[1] = float32(.5 + rnd.NormFloat64())
 			//targets[0] = float32(.5 + rnd.NormFloat64())
