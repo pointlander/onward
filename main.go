@@ -51,7 +51,7 @@ type EntropyLayer struct {
 }
 
 // NewEntropyLayer creates a new entropy layer
-func NewEntropyLayer() *EntropyLayer {
+func NewEntropyLayer(weights []float32) *EntropyLayer {
 	rnd := rand.New(rand.NewSource(1))
 
 	others := tf32.NewSet()
@@ -72,10 +72,11 @@ func NewEntropyLayer() *EntropyLayer {
 			}
 			continue
 		}
-		factor := math.Sqrt(2.0 / float64(w.S[0]))
+		/*factor := math.Sqrt(2.0 / float64(w.S[0]))
 		for i := 0; i < cap(w.X); i++ {
 			w.X = append(w.X, float32(rnd.NormFloat64()*factor))
-		}
+		}*/
+		w.X = append(w.X, weights...)
 		w.States = make([][]float32, StateTotal)
 		for i := range w.States {
 			w.States[i] = make([]float32, len(w.X))
@@ -83,8 +84,9 @@ func NewEntropyLayer() *EntropyLayer {
 	}
 
 	// The neural network is the attention model from attention is all you need
-	l1 := tf32.ReLu(tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1")))
-	cost := tf32.Sum(tf32.Entropy(tf32.Softmax(tf32.T(tf32.Mul(tf32.Softmax(l1), tf32.T(set.Get("w1")))))))
+	x := tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1"))
+	l1 := tf32.TanH(x)
+	cost := tf32.Sum(tf32.Entropy(tf32.Softmax(tf32.T(tf32.Mul(tf32.Softmax(x), tf32.T(set.Get("w1")))))))
 
 	return &EntropyLayer{
 		Rnd:    rnd,
@@ -200,7 +202,7 @@ func NewSupervisedLayer() *SupervisedyLayer {
 	}
 
 	// The neural network is the attention model from attention is all you need
-	l1 := tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1")))
+	l1 := tf32.TanH(tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1")))
 	cost := tf32.Sum(tf32.Quadratic(l1, others.Get("targets")))
 
 	return &SupervisedyLayer{
@@ -275,7 +277,8 @@ func (s *SupervisedyLayer) Save() {
 // TODO: only use negative data for last layer
 func main() {
 	rnd, sign, inputs, targets := rand.New(rand.NewSource(1)), -1.0, make([]float32, 8), make([]float32, 4)
-	entropy := NewEntropyLayer()
+	inputs = []float32{-1, -1, -1, 1, 1, -1, 1, 1}
+	entropy := NewEntropyLayer(inputs)
 	supervised := NewSupervisedLayer()
 
 	data := [][]float32{
@@ -294,28 +297,27 @@ func main() {
 			sign = -1
 			//inputs[0] = example[0]
 			//inputs[1] = example[1]
-			inputs = []float32{0, 0, 0, 1, 1, 0, 1, 1}
-			targets[0] = 0
+			inputs = []float32{-1, -1, -1, 1, 1, -1, 1, 1}
+			targets[0] = -1
 			targets[1] = 1
 			targets[2] = 1
-			targets[3] = 0
+			targets[3] = -1
 		} else {
 			sign = 1
 			//inputs[0] = float32(.5 + rnd.NormFloat64())
 			//inputs[1] = float32(.5 + rnd.NormFloat64())
 			//targets[0] = float32(.5 + rnd.NormFloat64())
-			inputs[0] = float32(.5 + rnd.NormFloat64())
-			inputs[1] = float32(.5 + rnd.NormFloat64())
-			inputs[2] = float32(.5 + rnd.NormFloat64())
-			inputs[3] = float32(.5 + rnd.NormFloat64())
-			inputs[4] = float32(.5 + rnd.NormFloat64())
-			inputs[5] = float32(.5 + rnd.NormFloat64())
-			inputs[6] = float32(.5 + rnd.NormFloat64())
-			inputs[7] = float32(.5 + rnd.NormFloat64())
+			inputs = []float32{-1, -1, -1, 1, 1, -1, 1, 1}
+			rand.Shuffle(len(inputs), func(i, j int) {
+				inputs[i], inputs[j] = inputs[j], inputs[i]
+			})
 			targets[0] = 1
-			targets[1] = 0
-			targets[2] = 0
+			targets[1] = -1
+			targets[2] = -1
 			targets[3] = 1
+			rand.Shuffle(len(targets), func(i, j int) {
+				targets[i], targets[j] = targets[j], targets[i]
+			})
 		}
 
 		start := time.Now()
