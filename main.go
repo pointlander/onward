@@ -356,6 +356,8 @@ func main() {
 		})
 	}*/
 
+	inputs = []float32{-1, -1, -1, 1, 1, -1, 1, 1}
+	copy(entropy.Input.X, inputs)
 	entropy.L1(func(a *tf32.V) bool {
 		copy(supervised.Input.X, a.X)
 		fmt.Println(a.X)
