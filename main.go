@@ -333,7 +333,7 @@ func main() {
 		}
 	}
 
-	for _, example := range data {
+	/*for _, example := range data {
 		entropy.Input.X[0] = example[0]
 		entropy.Input.X[1] = example[1]
 		entropy.L1(func(a *tf32.V) bool {
@@ -345,7 +345,17 @@ func main() {
 			})
 			return true
 		})
-	}
+	}*/
+
+	entropy.L1(func(a *tf32.V) bool {
+		copy(supervised.Input.X, a.X)
+		fmt.Println(a.X)
+		supervised.L1(func(a *tf32.V) bool {
+			fmt.Println(a.X)
+			return true
+		})
+		return true
+	})
 
 	entropy.Save()
 	supervised.Save()
