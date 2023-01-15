@@ -274,7 +274,7 @@ func (s *SupervisedyLayer) Save() {
 // TODO: use data as initial weights
 // TODO: only use negative data for last layer
 func main() {
-	rnd, sign, inputs, targets := rand.New(rand.NewSource(1)), -1.0, make([]float32, 0, 8), make([]float32, 4)
+	rnd, sign, inputs, targets := rand.New(rand.NewSource(1)), -1.0, make([]float32, 8), make([]float32, 4)
 	entropy := NewEntropyLayer()
 	supervised := NewSupervisedLayer()
 
@@ -285,7 +285,6 @@ func main() {
 		{1, 1, 0},
 	}
 
-	inputs = append(inputs, 0, 0, 0, 1, 1, 0, 1, 1)
 	_ = data
 	_ = rnd
 	// The stochastic gradient descent loop
@@ -295,6 +294,7 @@ func main() {
 			sign = -1
 			//inputs[0] = example[0]
 			//inputs[1] = example[1]
+			inputs = []float32{0, 0, 0, 1, 1, 0, 1, 1}
 			targets[0] = 0
 			targets[1] = 1
 			targets[2] = 1
@@ -304,6 +304,14 @@ func main() {
 			//inputs[0] = float32(.5 + rnd.NormFloat64())
 			//inputs[1] = float32(.5 + rnd.NormFloat64())
 			//targets[0] = float32(.5 + rnd.NormFloat64())
+			inputs[0] = float32(.5 + rnd.NormFloat64())
+			inputs[1] = float32(.5 + rnd.NormFloat64())
+			inputs[2] = float32(.5 + rnd.NormFloat64())
+			inputs[3] = float32(.5 + rnd.NormFloat64())
+			inputs[4] = float32(.5 + rnd.NormFloat64())
+			inputs[5] = float32(.5 + rnd.NormFloat64())
+			inputs[6] = float32(.5 + rnd.NormFloat64())
+			inputs[7] = float32(.5 + rnd.NormFloat64())
 			targets[0] = 1
 			targets[1] = 0
 			targets[2] = 0
@@ -313,9 +321,9 @@ func main() {
 		start := time.Now()
 		// Step the model
 		var loss float32
-		if sign == -1 {
-			loss = entropy.Step(sign, inputs)
-		}
+		//if sign == -1 {
+		loss = entropy.Step(sign, inputs)
+		//}
 		var next *tf32.V
 		entropy.L1(func(a *tf32.V) bool {
 			next = a
