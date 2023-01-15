@@ -26,7 +26,7 @@ const (
 	// Eta is the learning rate
 	Eta = .3
 	// Width is the width of the network
-	Width = 3
+	Width = 4
 )
 
 const (
@@ -42,6 +42,7 @@ const (
 type EntropyLayer struct {
 	Rnd    *rand.Rand
 	Set    tf32.Set
+	Others tf32.Set
 	Input  *tf32.V
 	L1     tf32.Meta
 	Cost   tf32.Meta
@@ -54,7 +55,7 @@ func NewEntropyLayer() *EntropyLayer {
 	rnd := rand.New(rand.NewSource(1))
 
 	others := tf32.NewSet()
-	others.Add("inputs", 2, 1)
+	others.Add("inputs", 2, 4)
 	inputs := others.ByName["inputs"]
 	inputs.X = inputs.X[:cap(inputs.X)]
 
@@ -83,11 +84,12 @@ func NewEntropyLayer() *EntropyLayer {
 
 	// The neural network is the attention model from attention is all you need
 	l1 := tf32.ReLu(tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1")))
-	cost := tf32.Entropy(tf32.Softmax(tf32.T(tf32.Mul(tf32.Softmax(l1), tf32.T(set.Get("w1"))))))
+	cost := tf32.Sum(tf32.Entropy(tf32.Softmax(tf32.T(tf32.Mul(tf32.Softmax(l1), tf32.T(set.Get("w1")))))))
 
 	return &EntropyLayer{
 		Rnd:    rnd,
 		Set:    set,
+		Others: others,
 		Input:  inputs,
 		L1:     l1,
 		Cost:   cost,
@@ -117,6 +119,8 @@ func (e *EntropyLayer) Step(sign float64, in []float32) float32 {
 		}
 	}
 
+	e.Set.Zero()
+	e.Others.Zero()
 	e.Points = append(e.Points, plotter.XY{X: i, Y: float64(loss)})
 
 	return loss
@@ -151,6 +155,7 @@ func (e *EntropyLayer) Save() {
 type SupervisedyLayer struct {
 	Rnd     *rand.Rand
 	Set     tf32.Set
+	Others  tf32.Set
 	Input   *tf32.V
 	Targets *tf32.V
 	L1      tf32.Meta
@@ -164,8 +169,8 @@ func NewSupervisedLayer() *SupervisedyLayer {
 	rnd := rand.New(rand.NewSource(1))
 
 	others := tf32.NewSet()
-	others.Add("inputs", Width, 1)
-	others.Add("targets", 1, 1)
+	others.Add("inputs", Width, 4)
+	others.Add("targets", 1, 4)
 	inputs := others.ByName["inputs"]
 	inputs.X = inputs.X[:cap(inputs.X)]
 	targets := others.ByName["targets"]
@@ -196,11 +201,12 @@ func NewSupervisedLayer() *SupervisedyLayer {
 
 	// The neural network is the attention model from attention is all you need
 	l1 := tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1")))
-	cost := tf32.Quadratic(l1, others.Get("targets"))
+	cost := tf32.Sum(tf32.Quadratic(l1, others.Get("targets")))
 
 	return &SupervisedyLayer{
 		Rnd:     rnd,
 		Set:     set,
+		Others:  others,
 		Input:   inputs,
 		Targets: targets,
 		L1:      l1,
@@ -231,6 +237,8 @@ func (s *SupervisedyLayer) Step(sign float64, in []float32) float32 {
 		}
 	}
 
+	s.Set.Zero()
+	s.Others.Zero()
 	s.Points = append(s.Points, plotter.XY{X: i, Y: float64(loss)})
 
 	return loss
@@ -261,8 +269,12 @@ func (s *SupervisedyLayer) Save() {
 	s.Set.Save("supervised_set.w", 0, 0)
 }
 
+// TODO: set width to 4
+// TODO: mini batch
+// TODO: use data as initial weights
+// TODO: only use negative data for last layer
 func main() {
-	rnd, sign, inputs, targets := rand.New(rand.NewSource(1)), -1.0, make([]float32, 2), make([]float32, 1)
+	rnd, sign, inputs, targets := rand.New(rand.NewSource(1)), -1.0, make([]float32, 0, 8), make([]float32, 4)
 	entropy := NewEntropyLayer()
 	supervised := NewSupervisedLayer()
 
@@ -273,29 +285,37 @@ func main() {
 		{1, 1, 0},
 	}
 
+	inputs = append(inputs, 0, 0, 0, 1, 1, 0, 1, 1)
+	_ = data
+	_ = rnd
 	// The stochastic gradient descent loop
 	for i := 0; i < 1024; i++ {
-		example := data[rnd.Intn(4)]
+		//example := data[rnd.Intn(4)]
 		if i&1 == 0 {
 			sign = -1
-			inputs[0] = example[0]
-			inputs[1] = example[1]
-			targets[0] = example[2]
+			//inputs[0] = example[0]
+			//inputs[1] = example[1]
+			targets[0] = 0
+			targets[1] = 1
+			targets[2] = 1
+			targets[3] = 0
 		} else {
 			sign = 1
-			if rnd.Intn(2) == 0 {
-				inputs[0] = 1 - example[0]
-				inputs[1] = example[1]
-			} else {
-				inputs[0] = example[0]
-				inputs[1] = 1 - example[1]
-			}
-			targets[0] = example[2]
+			//inputs[0] = float32(.5 + rnd.NormFloat64())
+			//inputs[1] = float32(.5 + rnd.NormFloat64())
+			//targets[0] = float32(.5 + rnd.NormFloat64())
+			targets[0] = 1
+			targets[1] = 0
+			targets[2] = 0
+			targets[3] = 1
 		}
 
 		start := time.Now()
 		// Step the model
-		loss := entropy.Step(sign, inputs)
+		var loss float32
+		if sign == -1 {
+			loss = entropy.Step(sign, inputs)
+		}
 		var next *tf32.V
 		entropy.L1(func(a *tf32.V) bool {
 			next = a
