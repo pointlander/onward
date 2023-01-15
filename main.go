@@ -25,6 +25,8 @@ const (
 	B2 = 0.999
 	// Eta is the learning rate
 	Eta = .3
+	// Width is the width of the network
+	Width = 3
 )
 
 const (
@@ -58,8 +60,8 @@ func NewEntropyLayer() *EntropyLayer {
 
 	// Create the weight data matrix
 	set := tf32.NewSet()
-	set.Add("w1", 2, 3)
-	set.Add("b1", 3, 1)
+	set.Add("w1", 2, Width)
+	set.Add("b1", Width, 1)
 	for _, w := range set.Weights {
 		if strings.HasPrefix(w.N, "b") {
 			w.X = w.X[:cap(w.X)]
@@ -142,27 +144,165 @@ func (e *EntropyLayer) Save() {
 		panic(err)
 	}
 
-	e.Set.Save("set.w", 0, 0)
+	e.Set.Save("entropy_set.w", 0, 0)
+}
+
+// SupervisedLayer is an supervised learning layer
+type SupervisedyLayer struct {
+	Rnd     *rand.Rand
+	Set     tf32.Set
+	Input   *tf32.V
+	Targets *tf32.V
+	L1      tf32.Meta
+	Cost    tf32.Meta
+	I       float64
+	Points  plotter.XYs
+}
+
+// NewEntropyLayer creates a new entropy layer
+func NewSupervisedLayer() *SupervisedyLayer {
+	rnd := rand.New(rand.NewSource(1))
+
+	others := tf32.NewSet()
+	others.Add("inputs", Width, 1)
+	others.Add("targets", 1, 1)
+	inputs := others.ByName["inputs"]
+	inputs.X = inputs.X[:cap(inputs.X)]
+	targets := others.ByName["targets"]
+	targets.X = targets.X[:cap(targets.X)]
+
+	// Create the weight data matrix
+	set := tf32.NewSet()
+	set.Add("w1", Width, 1)
+	set.Add("b1", 1, 1)
+	for _, w := range set.Weights {
+		if strings.HasPrefix(w.N, "b") {
+			w.X = w.X[:cap(w.X)]
+			w.States = make([][]float32, StateTotal)
+			for i := range w.States {
+				w.States[i] = make([]float32, len(w.X))
+			}
+			continue
+		}
+		factor := math.Sqrt(2.0 / float64(w.S[0]))
+		for i := 0; i < cap(w.X); i++ {
+			w.X = append(w.X, float32(rnd.NormFloat64()*factor))
+		}
+		w.States = make([][]float32, StateTotal)
+		for i := range w.States {
+			w.States[i] = make([]float32, len(w.X))
+		}
+	}
+
+	// The neural network is the attention model from attention is all you need
+	l1 := tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1")))
+	cost := tf32.Quadratic(l1, others.Get("targets"))
+
+	return &SupervisedyLayer{
+		Rnd:     rnd,
+		Set:     set,
+		Input:   inputs,
+		Targets: targets,
+		L1:      l1,
+		Cost:    cost,
+		Points:  make(plotter.XYs, 0, 8),
+	}
+}
+
+// Step steps the layer forward
+func (s *SupervisedyLayer) Step(sign float64, in []float32) float32 {
+	s.I++
+	i := s.I
+	copy(s.Input.X, in)
+	loss := tf32.Gradient(s.Cost).X[0]
+
+	// Update the point weights with the partial derivatives using adam
+	b1, b2 := float32(math.Pow(B1, i)), float32(math.Pow(float64(B2), i))
+	for j, w := range s.Set.Weights {
+		for k, d := range w.D {
+			g := d
+			m := B1*w.States[StateM][k] + (1-B1)*g
+			v := B2*w.States[StateV][k] + (1-B2)*g*g
+			w.States[StateM][k] = m
+			w.States[StateV][k] = v
+			mhat := m / (1 - b1)
+			vhat := v / (1 - b2)
+			s.Set.Weights[j].X[k] += float32(sign) * Eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
+		}
+	}
+
+	s.Points = append(s.Points, plotter.XY{X: i, Y: float64(loss)})
+
+	return loss
+}
+
+// Save plots and saves the model
+func (s *SupervisedyLayer) Save() {
+	// Plot the cost
+	p := plot.New()
+
+	p.Title.Text = "epochs vs cost"
+	p.X.Label.Text = "epochs"
+	p.Y.Label.Text = "cost"
+
+	scatter, err := plotter.NewScatter(s.Points)
+	if err != nil {
+		panic(err)
+	}
+	scatter.GlyphStyle.Radius = vg.Length(1)
+	scatter.GlyphStyle.Shape = draw.CircleGlyph{}
+	p.Add(scatter)
+
+	err = p.Save(8*vg.Inch, 8*vg.Inch, "supervised_cost.png")
+	if err != nil {
+		panic(err)
+	}
+
+	s.Set.Save("supervised_set.w", 0, 0)
 }
 
 func main() {
-	rnd, sign, inputs := rand.New(rand.NewSource(1)), -1.0, make([]float32, 2)
+	rnd, sign, inputs, targets := rand.New(rand.NewSource(1)), -1.0, make([]float32, 2), make([]float32, 1)
 	entropy := NewEntropyLayer()
+	supervised := NewSupervisedLayer()
+
+	data := [][]float32{
+		{0, 0, 0},
+		{0, 1, 1},
+		{1, 0, 1},
+		{1, 1, 0},
+	}
+
 	// The stochastic gradient descent loop
-	for i := 0; i < 64; i++ {
+	for i := 0; i < 1024; i++ {
+		example := data[rnd.Intn(4)]
 		if i&1 == 0 {
 			sign = -1
-			inputs[0] = float32(rnd.Intn(2))
-			inputs[1] = float32(rnd.Intn(2))
+			inputs[0] = example[0]
+			inputs[1] = example[1]
+			targets[0] = example[2]
 		} else {
-			sign = .5
-			inputs[0] = float32(.5 + rnd.NormFloat64())
-			inputs[1] = float32(.5 + rnd.NormFloat64())
+			sign = 1
+			if rnd.Intn(2) == 0 {
+				inputs[0] = 1 - example[0]
+				inputs[1] = example[1]
+			} else {
+				inputs[0] = example[0]
+				inputs[1] = 1 - example[1]
+			}
+			targets[0] = example[2]
 		}
 
 		start := time.Now()
 		// Step the model
 		loss := entropy.Step(sign, inputs)
+		var next *tf32.V
+		entropy.L1(func(a *tf32.V) bool {
+			next = a
+			return true
+		})
+		copy(supervised.Targets.X, targets)
+		loss += supervised.Step(sign, next.X)
 
 		end := time.Since(start)
 		fmt.Println(i, loss, end)
@@ -173,20 +313,20 @@ func main() {
 		}
 	}
 
-	data := [][]float32{
-		{0, 0, 0},
-		{0, 1, 1},
-		{1, 0, 1},
-		{1, 1, 0},
-	}
 	for _, example := range data {
 		entropy.Input.X[0] = example[0]
 		entropy.Input.X[1] = example[1]
 		entropy.L1(func(a *tf32.V) bool {
+			copy(supervised.Input.X, a.X)
 			fmt.Println(example, a.X)
+			supervised.L1(func(a *tf32.V) bool {
+				fmt.Println(example, a.X[0])
+				return true
+			})
 			return true
 		})
 	}
 
 	entropy.Save()
+	supervised.Save()
 }
