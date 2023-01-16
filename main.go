@@ -84,8 +84,9 @@ func NewEntropyLayer(weights []float32) *EntropyLayer {
 	}
 
 	// The neural network is the attention model from attention is all you need
-	l1 := tf32.TanH(tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1")))
-	cost := tf32.Sum(tf32.Entropy(tf32.Softmax(tf32.T(tf32.Mul(tf32.Softmax(l1), tf32.T(set.Get("w1")))))))
+	x := tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1"))
+	l1 := tf32.TanH(x)
+	cost := tf32.Sum(tf32.Entropy(tf32.Softmax(tf32.T(tf32.Mul(tf32.Softmax(x), tf32.T(set.Get("w1")))))))
 
 	return &EntropyLayer{
 		Rnd:    rnd,
@@ -270,61 +271,25 @@ func (s *SupervisedyLayer) Save() {
 	s.Set.Save("supervised_set.w", 0, 0)
 }
 
-// TODO: set width to 4
-// TODO: mini batch
-// TODO: use data as initial weights
-// TODO: only use negative data for last layer
 func main() {
-	rnd, sign, inputs, targets := rand.New(rand.NewSource(1)), -1.0, make([]float32, 8), make([]float32, 4)
+	sign, inputs, targets := -1.0, make([]float32, 8), make([]float32, 4)
 	inputs = []float32{-1, -1, -1, 1, 1, -1, 1, 1}
 	entropy := NewEntropyLayer(inputs)
 	supervised := NewSupervisedLayer()
 
-	data := [][]float32{
-		{0, 0, 0},
-		{0, 1, 1},
-		{1, 0, 1},
-		{1, 1, 0},
-	}
+	sign = -1
+	inputs = []float32{-1, -1, -1, 1, 1, -1, 1, 1}
+	targets[0] = -1
+	targets[1] = 1
+	targets[2] = 1
+	targets[3] = -1
 
-	_ = data
-	_ = rnd
 	// The stochastic gradient descent loop
-	for i := 0; i < 256; i++ {
-		//example := data[rnd.Intn(4)]
-		if i&1 == 0 {
-			sign = -1
-			//inputs[0] = example[0]
-			//inputs[1] = example[1]
-			inputs = []float32{-1, -1, -1, 1, 1, -1, 1, 1}
-			targets[0] = -1
-			targets[1] = 1
-			targets[2] = 1
-			targets[3] = -1
-		} else {
-			sign = .5
-			//inputs[0] = float32(.5 + rnd.NormFloat64())
-			//inputs[1] = float32(.5 + rnd.NormFloat64())
-			//targets[0] = float32(.5 + rnd.NormFloat64())
-			inputs = []float32{-1, -1, -1, 1, 1, -1, 1, 1}
-			rand.Shuffle(len(inputs), func(i, j int) {
-				inputs[i], inputs[j] = inputs[j], inputs[i]
-			})
-			targets[0] = 1
-			targets[1] = -1
-			targets[2] = -1
-			targets[3] = 1
-			rand.Shuffle(len(targets), func(i, j int) {
-				targets[i], targets[j] = targets[j], targets[i]
-			})
-		}
-
+	for i := 0; i < 1024; i++ {
 		start := time.Now()
 		// Step the model
 		var loss float32
-		//if sign == -1 {
 		loss = entropy.Step(sign, inputs)
-		//}
 		var next *tf32.V
 		entropy.L1(func(a *tf32.V) bool {
 			next = a
@@ -332,7 +297,6 @@ func main() {
 		})
 		copy(supervised.Targets.X, targets)
 		loss += supervised.Step(sign, next.X)
-
 		end := time.Since(start)
 		fmt.Println(i, loss, end)
 
@@ -341,20 +305,6 @@ func main() {
 			break
 		}
 	}
-
-	/*for _, example := range data {
-		entropy.Input.X[0] = example[0]
-		entropy.Input.X[1] = example[1]
-		entropy.L1(func(a *tf32.V) bool {
-			copy(supervised.Input.X, a.X)
-			fmt.Println(example, a.X)
-			supervised.L1(func(a *tf32.V) bool {
-				fmt.Println(example, a.X[0])
-				return true
-			})
-			return true
-		})
-	}*/
 
 	inputs = []float32{-1, -1, -1, 1, 1, -1, 1, 1}
 	copy(entropy.Input.X, inputs)
