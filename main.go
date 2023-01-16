@@ -85,7 +85,7 @@ func NewEntropyLayer(weights []float32) *EntropyLayer {
 
 	// The neural network is the attention model from attention is all you need
 	x := tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1"))
-	l1 := tf32.TanH(x)
+	l1 := tf32.Everett(x)
 	cost := tf32.Sum(tf32.Entropy(tf32.Softmax(tf32.T(tf32.Mul(tf32.Softmax(x), tf32.T(set.Get("w1")))))))
 
 	return &EntropyLayer{
@@ -100,7 +100,7 @@ func NewEntropyLayer(weights []float32) *EntropyLayer {
 }
 
 // Step steps the layer forward
-func (e *EntropyLayer) Step(sign float64, in []float32) float32 {
+func (e *EntropyLayer) Step(in []float32) float32 {
 	e.I++
 	i := e.I
 	copy(e.Input.X, in)
@@ -117,7 +117,7 @@ func (e *EntropyLayer) Step(sign float64, in []float32) float32 {
 			w.States[StateV][k] = v
 			mhat := m / (1 - b1)
 			vhat := v / (1 - b2)
-			e.Set.Weights[j].X[k] += float32(sign) * Eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
+			e.Set.Weights[j].X[k] -= Eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
 		}
 	}
 
@@ -171,7 +171,7 @@ func NewSupervisedLayer() *SupervisedyLayer {
 	rnd := rand.New(rand.NewSource(1))
 
 	others := tf32.NewSet()
-	others.Add("inputs", Width, 4)
+	others.Add("inputs", 2*Width, 4)
 	others.Add("targets", 1, 4)
 	inputs := others.ByName["inputs"]
 	inputs.X = inputs.X[:cap(inputs.X)]
@@ -180,7 +180,7 @@ func NewSupervisedLayer() *SupervisedyLayer {
 
 	// Create the weight data matrix
 	set := tf32.NewSet()
-	set.Add("w1", Width, 1)
+	set.Add("w1", 2*Width, 1)
 	set.Add("b1", 1, 1)
 	for _, w := range set.Weights {
 		if strings.HasPrefix(w.N, "b") {
@@ -218,7 +218,7 @@ func NewSupervisedLayer() *SupervisedyLayer {
 }
 
 // Step steps the layer forward
-func (s *SupervisedyLayer) Step(sign float64, in []float32) float32 {
+func (s *SupervisedyLayer) Step(in []float32) float32 {
 	s.I++
 	i := s.I
 	copy(s.Input.X, in)
@@ -235,7 +235,7 @@ func (s *SupervisedyLayer) Step(sign float64, in []float32) float32 {
 			w.States[StateV][k] = v
 			mhat := m / (1 - b1)
 			vhat := v / (1 - b2)
-			s.Set.Weights[j].X[k] += float32(sign) * Eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
+			s.Set.Weights[j].X[k] -= Eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
 		}
 	}
 
@@ -272,31 +272,24 @@ func (s *SupervisedyLayer) Save() {
 }
 
 func main() {
-	sign, inputs, targets := -1.0, make([]float32, 8), make([]float32, 4)
-	inputs = []float32{-1, -1, -1, 1, 1, -1, 1, 1}
+	inputs := []float32{-1, -1, -1, 1, 1, -1, 1, 1}
+	targets := []float32{-1, 1, 1, -1}
 	entropy := NewEntropyLayer(inputs)
 	supervised := NewSupervisedLayer()
 
-	sign = -1
-	inputs = []float32{-1, -1, -1, 1, 1, -1, 1, 1}
-	targets[0] = -1
-	targets[1] = 1
-	targets[2] = 1
-	targets[3] = -1
-
 	// The stochastic gradient descent loop
-	for i := 0; i < 1024; i++ {
+	for i := 0; i < 64; i++ {
 		start := time.Now()
 		// Step the model
 		var loss float32
-		loss = entropy.Step(sign, inputs)
+		loss = entropy.Step(inputs)
 		var next *tf32.V
 		entropy.L1(func(a *tf32.V) bool {
 			next = a
 			return true
 		})
 		copy(supervised.Targets.X, targets)
-		loss += supervised.Step(sign, next.X)
+		loss += supervised.Step(next.X)
 		end := time.Since(start)
 		fmt.Println(i, loss, end)
 
@@ -306,7 +299,6 @@ func main() {
 		}
 	}
 
-	inputs = []float32{-1, -1, -1, 1, 1, -1, 1, 1}
 	copy(entropy.Input.X, inputs)
 	entropy.L1(func(a *tf32.V) bool {
 		copy(supervised.Input.X, a.X)
