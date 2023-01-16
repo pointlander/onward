@@ -25,8 +25,6 @@ const (
 	B2 = 0.999
 	// Eta is the learning rate
 	Eta = .3
-	// Width is the width of the network
-	Width = 4
 )
 
 const (
@@ -51,18 +49,18 @@ type EntropyLayer struct {
 }
 
 // NewEntropyLayer creates a new entropy layer
-func NewEntropyLayer(weights []float32) *EntropyLayer {
+func NewEntropyLayer(inputSize, outputSize, batchSize int, weights []float32) *EntropyLayer {
 	rnd := rand.New(rand.NewSource(1))
 
 	others := tf32.NewSet()
-	others.Add("inputs", 2, 4)
+	others.Add("inputs", inputSize, batchSize)
 	inputs := others.ByName["inputs"]
 	inputs.X = inputs.X[:cap(inputs.X)]
 
 	// Create the weight data matrix
 	set := tf32.NewSet()
-	set.Add("w1", 2, Width)
-	set.Add("b1", Width, 1)
+	set.Add("w1", inputSize, outputSize)
+	set.Add("b1", outputSize, 1)
 	for _, w := range set.Weights {
 		if strings.HasPrefix(w.N, "b") {
 			w.X = w.X[:cap(w.X)]
@@ -167,12 +165,12 @@ type SupervisedyLayer struct {
 }
 
 // NewEntropyLayer creates a new entropy layer
-func NewSupervisedLayer() *SupervisedyLayer {
+func NewSupervisedLayer(inputSize, outputSize, batchSize int) *SupervisedyLayer {
 	rnd := rand.New(rand.NewSource(1))
 
 	others := tf32.NewSet()
-	others.Add("inputs", 2*Width, 4)
-	others.Add("targets", 1, 4)
+	others.Add("inputs", inputSize, batchSize)
+	others.Add("targets", outputSize, batchSize)
 	inputs := others.ByName["inputs"]
 	inputs.X = inputs.X[:cap(inputs.X)]
 	targets := others.ByName["targets"]
@@ -180,8 +178,8 @@ func NewSupervisedLayer() *SupervisedyLayer {
 
 	// Create the weight data matrix
 	set := tf32.NewSet()
-	set.Add("w1", 2*Width, 1)
-	set.Add("b1", 1, 1)
+	set.Add("w1", inputSize, outputSize)
+	set.Add("b1", outputSize, 1)
 	for _, w := range set.Weights {
 		if strings.HasPrefix(w.N, "b") {
 			w.X = w.X[:cap(w.X)]
@@ -271,11 +269,12 @@ func (s *SupervisedyLayer) Save() {
 	s.Set.Save("supervised_set.w", 0, 0)
 }
 
-func main() {
+// XORExample is an example of the XOR problem
+func XORExample() {
 	inputs := []float32{-1, -1, -1, 1, 1, -1, 1, 1}
 	targets := []float32{-1, 1, 1, -1}
-	entropy := NewEntropyLayer(inputs)
-	supervised := NewSupervisedLayer()
+	entropy := NewEntropyLayer(2, 4, 4, inputs)
+	supervised := NewSupervisedLayer(2*4, 1, 4)
 
 	// The stochastic gradient descent loop
 	for i := 0; i < 64; i++ {
@@ -305,6 +304,18 @@ func main() {
 		fmt.Println(a.X)
 		supervised.L1(func(a *tf32.V) bool {
 			fmt.Println(a.X)
+			if a.X[0] > 0 {
+				panic("should be -1")
+			}
+			if a.X[1] < 0 {
+				panic("should be 1")
+			}
+			if a.X[2] < 0 {
+				panic("should be 1")
+			}
+			if a.X[3] > 0 {
+				panic("should be -1")
+			}
 			return true
 		})
 		return true
@@ -312,4 +323,8 @@ func main() {
 
 	entropy.Save()
 	supervised.Save()
+}
+
+func main() {
+	XORExample()
 }
