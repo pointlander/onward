@@ -372,7 +372,7 @@ func IRISExample() {
 		entropy.L1(func(a *tf32.V) bool {
 			next = a
 			for i, value := range next.X {
-				next.X[i] = value / 256
+				next.X[i] = value / 100
 			}
 			return true
 		})
@@ -387,11 +387,12 @@ func IRISExample() {
 		}
 	}
 
+	correct := 0
 	for i := 0; i < length; i++ {
 		copy(entropy.Input.X, inputs[i*4:i*4+4])
 		entropy.L1(func(a *tf32.V) bool {
 			for i, value := range a.X {
-				a.X[i] = value / 256
+				a.X[i] = value / 100
 			}
 			copy(supervised.Input.X, a.X)
 			supervised.L1(func(a *tf32.V) bool {
@@ -401,13 +402,17 @@ func IRISExample() {
 						index, max = i, value
 					}
 				}
-				fmt.Println(i, index, targets[i*3:i*3+3])
+				target := targets[i*3 : i*3+3]
+				fmt.Println(i, index, target)
+				if target[index] == 1.0 {
+					correct++
+				}
 				return true
 			})
 			return true
 		})
 	}
-
+	fmt.Println("correct=", correct)
 	entropy.Save()
 	supervised.Save()
 }
