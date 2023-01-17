@@ -360,8 +360,8 @@ func IRISExample() {
 		inputs = append(inputs, float32(measures[0]), float32(measures[1]), float32(measures[2]), float32(measures[3]))
 		targets[i*3+iris.Labels[item.Label]] = 1
 	}
-	entropy := NewEntropyLayer(4, 4, 1, inputs)
-	supervised := NewSupervisedLayer(2*4, 3, 1, tf32.Softmax, tf32.CrossEntropy)
+	entropy := NewEntropyLayer(4, 8, 1, inputs)
+	supervised := NewSupervisedLayer(2*8, 3, 1, tf32.Softmax, tf32.CrossEntropy)
 
 	// The stochastic gradient descent loop
 	for i := 0; i < 2048*1024; i++ {
