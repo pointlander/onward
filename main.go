@@ -360,7 +360,7 @@ func IRISExample() {
 		inputs = append(inputs, float32(measures[0]), float32(measures[1]), float32(measures[2]), float32(measures[3]))
 		targets[i*3+iris.Labels[item.Label]] = 1
 	}
-	entropy := NewEntropyLayer(4, 8, 1, inputs)
+	entropy := NewEntropyLayer(4, 8, 1, nil)
 	supervised := NewSupervisedLayer(2*8, 3, 1, tf32.Softmax, tf32.CrossEntropy)
 
 	// The stochastic gradient descent loop
@@ -378,9 +378,8 @@ func IRISExample() {
 				sum += value * value
 			}
 			scale := float32(math.Sqrt(float64(sum)))
-			_ = scale
 			for i, value := range next.X {
-				next.X[i] = value / 100
+				next.X[i] = value / scale
 			}
 			return true
 		})
@@ -404,9 +403,8 @@ func IRISExample() {
 				sum += value * value
 			}
 			scale := float32(math.Sqrt(float64(sum)))
-			_ = scale
 			for i, value := range a.X {
-				a.X[i] = value / 100
+				a.X[i] = value / scale
 			}
 			copy(supervised.Input.X, a.X)
 			supervised.L1(func(a *tf32.V) bool {
