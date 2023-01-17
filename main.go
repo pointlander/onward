@@ -364,7 +364,7 @@ func IRISExample() {
 	supervised := NewSupervisedLayer(2*4, 3, 1, tf32.Softmax, tf32.CrossEntropy)
 
 	// The stochastic gradient descent loop
-	for i := 0; i < 1024*1024; i++ {
+	for i := 0; i < 2048*1024; i++ {
 		start := time.Now()
 		index := rnd.Intn(length)
 		// Step the model
@@ -426,7 +426,7 @@ func IRISExample() {
 			return true
 		})
 	}
-	fmt.Println("correct=", correct)
+	fmt.Println("correct=", correct, float64(correct)/float64(length))
 	entropy.Save()
 	supervised.Save()
 }
