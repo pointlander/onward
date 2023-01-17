@@ -170,7 +170,9 @@ type SupervisedyLayer struct {
 }
 
 // NewEntropyLayer creates a new entropy layer
-func NewSupervisedLayer(inputSize, outputSize, batchSize int, activation func(a tf32.Meta, options ...map[string]interface{}) tf32.Meta) *SupervisedyLayer {
+func NewSupervisedLayer(inputSize, outputSize, batchSize int,
+	activation func(a tf32.Meta, options ...map[string]interface{}) tf32.Meta,
+	loss func(a, b tf32.Meta, options ...map[string]interface{}) tf32.Meta) *SupervisedyLayer {
 	rnd := rand.New(rand.NewSource(1))
 
 	others := tf32.NewSet()
@@ -205,7 +207,7 @@ func NewSupervisedLayer(inputSize, outputSize, batchSize int, activation func(a 
 	}
 
 	l1 := activation(tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1")))
-	cost := tf32.Sum(tf32.Quadratic(l1, others.Get("targets")))
+	cost := tf32.Sum(loss(l1, others.Get("targets")))
 
 	return &SupervisedyLayer{
 		Rnd:     rnd,
@@ -278,7 +280,7 @@ func XORExample() {
 	inputs := []float32{-1, -1, -1, 1, 1, -1, 1, 1}
 	targets := []float32{-1, 1, 1, -1}
 	entropy := NewEntropyLayer(2, 4, 4, inputs)
-	supervised := NewSupervisedLayer(2*4, 1, 4, tf32.TanH)
+	supervised := NewSupervisedLayer(2*4, 1, 4, tf32.TanH, tf32.Quadratic)
 
 	// The stochastic gradient descent loop
 	for i := 0; i < 64; i++ {
@@ -359,10 +361,10 @@ func IRISExample() {
 		targets[i*3+iris.Labels[item.Label]] = 1
 	}
 	entropy := NewEntropyLayer(4, 4, 1, inputs)
-	supervised := NewSupervisedLayer(2*4, 3, 1, tf32.Sigmoid)
+	supervised := NewSupervisedLayer(2*4, 3, 1, tf32.Softmax, tf32.CrossEntropy)
 
 	// The stochastic gradient descent loop
-	for i := 0; i < 512*1024; i++ {
+	for i := 0; i < 1024*1024; i++ {
 		start := time.Now()
 		index := rnd.Intn(length)
 		// Step the model
@@ -371,6 +373,12 @@ func IRISExample() {
 		var next *tf32.V
 		entropy.L1(func(a *tf32.V) bool {
 			next = a
+			sum := float32(0.0)
+			for _, value := range next.X {
+				sum += value * value
+			}
+			scale := float32(math.Sqrt(float64(sum)))
+			_ = scale
 			for i, value := range next.X {
 				next.X[i] = value / 100
 			}
@@ -391,6 +399,12 @@ func IRISExample() {
 	for i := 0; i < length; i++ {
 		copy(entropy.Input.X, inputs[i*4:i*4+4])
 		entropy.L1(func(a *tf32.V) bool {
+			sum := float32(0.0)
+			for _, value := range a.X {
+				sum += value * value
+			}
+			scale := float32(math.Sqrt(float64(sum)))
+			_ = scale
 			for i, value := range a.X {
 				a.X[i] = value / 100
 			}
