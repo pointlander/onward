@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pointlander/datum/iris"
 	"github.com/pointlander/gradient/tf32"
 	"gonum.org/v1/plot"
 	"gonum.org/v1/plot/plotter"
@@ -70,11 +71,15 @@ func NewEntropyLayer(inputSize, outputSize, batchSize int, weights []float32) *E
 			}
 			continue
 		}
-		/*factor := math.Sqrt(2.0 / float64(w.S[0]))
-		for i := 0; i < cap(w.X); i++ {
-			w.X = append(w.X, float32(rnd.NormFloat64()*factor))
-		}*/
-		w.X = append(w.X, weights...)
+		if len(weights) == 0 {
+			factor := math.Sqrt(2.0 / float64(w.S[0]))
+			for i := 0; i < cap(w.X); i++ {
+				w.X = append(w.X, float32(rnd.NormFloat64()*factor))
+			}
+		} else {
+			w.X = w.X[:cap(w.X)]
+			copy(w.X, weights)
+		}
 		w.States = make([][]float32, StateTotal)
 		for i := range w.States {
 			w.States[i] = make([]float32, len(w.X))
@@ -165,7 +170,7 @@ type SupervisedyLayer struct {
 }
 
 // NewEntropyLayer creates a new entropy layer
-func NewSupervisedLayer(inputSize, outputSize, batchSize int) *SupervisedyLayer {
+func NewSupervisedLayer(inputSize, outputSize, batchSize int, activation func(a tf32.Meta, options ...map[string]interface{}) tf32.Meta) *SupervisedyLayer {
 	rnd := rand.New(rand.NewSource(1))
 
 	others := tf32.NewSet()
@@ -199,8 +204,7 @@ func NewSupervisedLayer(inputSize, outputSize, batchSize int) *SupervisedyLayer 
 		}
 	}
 
-	// The neural network is the attention model from attention is all you need
-	l1 := tf32.TanH(tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1")))
+	l1 := activation(tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1")))
 	cost := tf32.Sum(tf32.Quadratic(l1, others.Get("targets")))
 
 	return &SupervisedyLayer{
@@ -274,7 +278,7 @@ func XORExample() {
 	inputs := []float32{-1, -1, -1, 1, 1, -1, 1, 1}
 	targets := []float32{-1, 1, 1, -1}
 	entropy := NewEntropyLayer(2, 4, 4, inputs)
-	supervised := NewSupervisedLayer(2*4, 1, 4)
+	supervised := NewSupervisedLayer(2*4, 1, 4, tf32.TanH)
 
 	// The stochastic gradient descent loop
 	for i := 0; i < 64; i++ {
@@ -325,6 +329,90 @@ func XORExample() {
 	supervised.Save()
 }
 
+// IRISExample is an example of the IRIS problem
+func IRISExample() {
+	rnd := rand.New(rand.NewSource(1))
+
+	// Load the iris data set
+	datum, err := iris.Load()
+	if err != nil {
+		panic(err)
+	}
+	fisher := datum.Fisher
+	length := len(fisher)
+	for _, value := range fisher {
+		sum := 0.0
+		for _, measure := range value.Measures {
+			sum += measure * measure
+		}
+		sum = math.Sqrt(sum)
+		for i := range value.Measures {
+			value.Measures[i] /= sum
+		}
+	}
+
+	inputs := make([]float32, 0, length*4)
+	targets := make([]float32, length*3)
+	for i, item := range fisher {
+		measures := item.Measures
+		inputs = append(inputs, float32(measures[0]), float32(measures[1]), float32(measures[2]), float32(measures[3]))
+		targets[i*3+iris.Labels[item.Label]] = 1
+	}
+	entropy := NewEntropyLayer(4, 4, 1, inputs)
+	supervised := NewSupervisedLayer(2*4, 3, 1, tf32.Sigmoid)
+
+	// The stochastic gradient descent loop
+	for i := 0; i < 512*1024; i++ {
+		start := time.Now()
+		index := rnd.Intn(length)
+		// Step the model
+		var loss float32
+		loss = entropy.Step(inputs[index*4 : index*4+4])
+		var next *tf32.V
+		entropy.L1(func(a *tf32.V) bool {
+			next = a
+			for i, value := range next.X {
+				next.X[i] = value / 256
+			}
+			return true
+		})
+		copy(supervised.Targets.X, targets[index*3:index*3+3])
+		loss += supervised.Step(next.X)
+		end := time.Since(start)
+		fmt.Println(i, loss, end)
+
+		if math.IsNaN(float64(loss)) {
+			fmt.Println(loss)
+			break
+		}
+	}
+
+	for i := 0; i < length; i++ {
+		copy(entropy.Input.X, inputs[i*4:i*4+4])
+		entropy.L1(func(a *tf32.V) bool {
+			for i, value := range a.X {
+				a.X[i] = value / 256
+			}
+			copy(supervised.Input.X, a.X)
+			supervised.L1(func(a *tf32.V) bool {
+				index, max := 0, float32(0.0)
+				for i, value := range a.X {
+					if value > max {
+						index, max = i, value
+					}
+				}
+				fmt.Println(i, index, targets[i*3:i*3+3])
+				return true
+			})
+			return true
+		})
+	}
+
+	entropy.Save()
+	supervised.Save()
+}
+
 func main() {
 	XORExample()
+	IRISExample()
 }
