@@ -422,8 +422,6 @@ func XORExample() {
 
 // IRISExample is an example of the IRIS problem
 func IRISExample() {
-	rnd := rand.New(rand.NewSource(1))
-
 	// Load the iris data set
 	datum, err := iris.Load()
 	if err != nil {
@@ -449,26 +447,29 @@ func IRISExample() {
 		inputs = append(inputs, float32(measures[0]), float32(measures[1]), float32(measures[2]), float32(measures[3]))
 		targets[i*3+iris.Labels[item.Label]] = 1
 	}
+	spherical := tf32.U(SphericalSoftmax)
 	crossEntropy := tf32.B(CrossEntropy)
-	entropy := NewEntropyLayer("iris", 4, 64, 1, Eta, nil)
-	supervised := NewSupervisedLayer("iris", 2*64, 3, 1, Eta, tf32.Softmax, crossEntropy)
+	entropy := NewEntropyLayer("iris", 4, 64, length, Eta, nil)
+	supervised := NewSupervisedLayer("iris", 2*64, 3, length, Eta, spherical, crossEntropy)
 
 	// The stochastic gradient descent loop
-	for i := 0; i < 16*1024; i++ {
+	for i := 0; i < 1024; i++ {
 		start := time.Now()
-		index := rnd.Intn(length)
+
 		// Step the model
-		loss := entropy.Step(inputs[index*4 : index*4+4])
+		loss := entropy.Step(inputs)
 		entropy.L1(func(a *tf32.V) bool {
-			sum := float32(0.0)
-			for _, value := range a.X {
-				sum += value * value
+			for j := 0; j < length; j++ {
+				x, sum := a.X[j*4:j*4+4], float32(0.0)
+				for _, value := range x {
+					sum += value * value
+				}
+				scale := float32(math.Sqrt(float64(sum)))
+				for i, value := range x {
+					a.X[i] = value / scale
+				}
 			}
-			scale := float32(math.Sqrt(float64(sum)))
-			for i, value := range a.X {
-				a.X[i] = value / scale
-			}
-			loss += supervised.Step(a.X, targets[index*3:index*3+3])
+			loss += supervised.Step(a.X, targets)
 			return true
 		})
 		end := time.Since(start)
@@ -481,21 +482,23 @@ func IRISExample() {
 	}
 
 	correct := 0
-	for i := 0; i < length; i++ {
-		copy(entropy.Input.X, inputs[i*4:i*4+4])
-		entropy.L1(func(a *tf32.V) bool {
-			sum := float32(0.0)
-			for _, value := range a.X {
+	copy(entropy.Input.X, inputs)
+	entropy.L1(func(a *tf32.V) bool {
+		for i := 0; i < length; i++ {
+			x, sum := a.X[i*4:i*4+4], float32(0.0)
+			for _, value := range x {
 				sum += value * value
 			}
 			scale := float32(math.Sqrt(float64(sum)))
-			for i, value := range a.X {
-				a.X[i] = value / scale
+			for i, value := range x {
+				x[i] = value / scale
 			}
-			copy(supervised.Input.X, a.X)
-			supervised.L1(func(a *tf32.V) bool {
-				index, max := 0, float32(0.0)
-				for i, value := range a.X {
+		}
+		copy(supervised.Input.X, a.X)
+		supervised.L1(func(a *tf32.V) bool {
+			for i := 0; i < length; i++ {
+				x, index, max := a.X[i*3:i*3+3], 0, float32(0.0)
+				for i, value := range x {
 					if value > max {
 						index, max = i, value
 					}
@@ -505,11 +508,11 @@ func IRISExample() {
 				if target[index] == 1.0 {
 					correct++
 				}
-				return true
-			})
+			}
 			return true
 		})
-	}
+		return true
+	})
 	fmt.Println("correct=", correct, float64(correct)/float64(length))
 	entropy.Save()
 	supervised.Save()
