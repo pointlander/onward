@@ -39,6 +39,7 @@ const (
 
 // EntropyLayer is an auto learning layer
 type EntropyLayer struct {
+	Name   string
 	Rnd    *rand.Rand
 	Set    tf32.Set
 	Others tf32.Set
@@ -50,7 +51,7 @@ type EntropyLayer struct {
 }
 
 // NewEntropyLayer creates a new entropy layer
-func NewEntropyLayer(inputSize, outputSize, batchSize int, weights []float32) *EntropyLayer {
+func NewEntropyLayer(name string, inputSize, outputSize, batchSize int, weights []float32) *EntropyLayer {
 	rnd := rand.New(rand.NewSource(1))
 
 	others := tf32.NewSet()
@@ -92,6 +93,7 @@ func NewEntropyLayer(inputSize, outputSize, batchSize int, weights []float32) *E
 	cost := tf32.Sum(tf32.Entropy(tf32.Softmax(tf32.T(tf32.Mul(tf32.Softmax(x), tf32.T(set.Get("w1")))))))
 
 	return &EntropyLayer{
+		Name:   name,
 		Rnd:    rnd,
 		Set:    set,
 		Others: others,
@@ -148,16 +150,17 @@ func (e *EntropyLayer) Save() {
 	scatter.GlyphStyle.Shape = draw.CircleGlyph{}
 	p.Add(scatter)
 
-	err = p.Save(8*vg.Inch, 8*vg.Inch, "entropy_cost.png")
+	err = p.Save(8*vg.Inch, 8*vg.Inch, fmt.Sprintf("%s_entropy_cost.png", e.Name))
 	if err != nil {
 		panic(err)
 	}
 
-	e.Set.Save("entropy_set.w", 0, 0)
+	e.Set.Save(fmt.Sprintf("%s_entropy_set.w", e.Name), 0, 0)
 }
 
 // SupervisedLayer is an supervised learning layer
 type SupervisedyLayer struct {
+	Name    string
 	Rnd     *rand.Rand
 	Set     tf32.Set
 	Others  tf32.Set
@@ -218,7 +221,7 @@ func CrossEntropy(k tf32.Continuation, node int, a, b *tf32.V, options ...map[st
 }
 
 // NewEntropyLayer creates a new entropy layer
-func NewSupervisedLayer(inputSize, outputSize, batchSize int,
+func NewSupervisedLayer(name string, inputSize, outputSize, batchSize int,
 	activation func(a tf32.Meta, options ...map[string]interface{}) tf32.Meta,
 	loss func(a, b tf32.Meta, options ...map[string]interface{}) tf32.Meta) *SupervisedyLayer {
 	rnd := rand.New(rand.NewSource(1))
@@ -258,6 +261,7 @@ func NewSupervisedLayer(inputSize, outputSize, batchSize int,
 	cost := tf32.Sum(loss(l1, others.Get("targets")))
 
 	return &SupervisedyLayer{
+		Name:    name,
 		Rnd:     rnd,
 		Set:     set,
 		Others:  others,
@@ -316,20 +320,20 @@ func (s *SupervisedyLayer) Save() {
 	scatter.GlyphStyle.Shape = draw.CircleGlyph{}
 	p.Add(scatter)
 
-	err = p.Save(8*vg.Inch, 8*vg.Inch, "supervised_cost.png")
+	err = p.Save(8*vg.Inch, 8*vg.Inch, fmt.Sprintf("%s_supervised_cost.png", s.Name))
 	if err != nil {
 		panic(err)
 	}
 
-	s.Set.Save("supervised_set.w", 0, 0)
+	s.Set.Save(fmt.Sprintf("%s_supervised_set.w", s.Name), 0, 0)
 }
 
 // XORExample is an example of the XOR problem
 func XORExample() {
 	inputs := []float32{-1, -1, -1, 1, 1, -1, 1, 1}
 	targets := []float32{-1, 1, 1, -1}
-	entropy := NewEntropyLayer(2, 4, 4, inputs)
-	supervised := NewSupervisedLayer(2*4, 1, 4, tf32.TanH, tf32.Quadratic)
+	entropy := NewEntropyLayer("xor", 2, 4, 4, inputs)
+	supervised := NewSupervisedLayer("xor", 2*4, 1, 4, tf32.TanH, tf32.Quadratic)
 
 	// The stochastic gradient descent loop
 	for i := 0; i < 64; i++ {
@@ -409,8 +413,8 @@ func IRISExample() {
 		targets[i*3+iris.Labels[item.Label]] = 1
 	}
 	crossEntropy := tf32.B(CrossEntropy)
-	entropy := NewEntropyLayer(4, 8, 1, nil)
-	supervised := NewSupervisedLayer(2*8, 3, 1, tf32.Softmax, crossEntropy)
+	entropy := NewEntropyLayer("iris", 4, 8, 1, nil)
+	supervised := NewSupervisedLayer("iris", 2*8, 3, 1, tf32.Softmax, crossEntropy)
 
 	// The stochastic gradient descent loop
 	for i := 0; i < 2048*1024; i++ {
