@@ -169,6 +169,54 @@ type SupervisedyLayer struct {
 	Points  plotter.XYs
 }
 
+func log(a float32) float32 {
+	return float32(math.Log(float64(a)))
+}
+
+// CrossEntropy computes the cross entropy cost of two tensors
+func CrossEntropy(k tf32.Continuation, node int, a, b *tf32.V, options ...map[string]interface{}) bool {
+	if len(a.S) != 2 || len(b.S) != 2 {
+		panic("tensor needs to have two dimensions")
+	}
+	width := a.S[0]
+	if width != b.S[0] || a.S[1] != b.S[1] {
+		panic("dimensions are not the same")
+	}
+	c, size := tf32.NewV(a.S[1]), len(a.X)
+
+	for i := 0; i < size; i += width {
+		av, bv, sum := a.X[i:i+width], b.X[i:i+width], float32(0.0)
+		for j, ax := range av {
+			bx := bv[j]
+			if bx == 1 {
+				sum += log(ax + .000001)
+			} else {
+				sum += log(1 - ax + .000001)
+			}
+		}
+		c.X = append(c.X, -sum)
+	}
+	if k(&c) {
+		return true
+	}
+	index := 0
+	for i := 0; i < size; i += width {
+		av, bv, ad, bd, d := a.X[i:i+width], b.X[i:i+width], a.D[i:i+width], b.D[i:i+width], c.D[index]
+		for j, ax := range av {
+			bx := bv[j]
+			if bx == 1 {
+				ad[j] -= d / (ax + .000001)
+				bd[j] -= log(ax+.000001) * d
+			} else {
+				ad[j] += d / (1 - ax + .000001)
+				bd[j] -= log(1-ax+.000001) * d
+			}
+		}
+		index++
+	}
+	return false
+}
+
 // NewEntropyLayer creates a new entropy layer
 func NewSupervisedLayer(inputSize, outputSize, batchSize int,
 	activation func(a tf32.Meta, options ...map[string]interface{}) tf32.Meta,
@@ -222,10 +270,11 @@ func NewSupervisedLayer(inputSize, outputSize, batchSize int,
 }
 
 // Step steps the layer forward
-func (s *SupervisedyLayer) Step(in []float32) float32 {
+func (s *SupervisedyLayer) Step(in, targets []float32) float32 {
 	s.I++
 	i := s.I
 	copy(s.Input.X, in)
+	copy(s.Targets.X, targets)
 	loss := tf32.Gradient(s.Cost).X[0]
 
 	// Update the point weights with the partial derivatives using adam
@@ -293,8 +342,7 @@ func XORExample() {
 			next = a
 			return true
 		})
-		copy(supervised.Targets.X, targets)
-		loss += supervised.Step(next.X)
+		loss += supervised.Step(next.X, targets)
 		end := time.Since(start)
 		fmt.Println(i, loss, end)
 
@@ -360,8 +408,9 @@ func IRISExample() {
 		inputs = append(inputs, float32(measures[0]), float32(measures[1]), float32(measures[2]), float32(measures[3]))
 		targets[i*3+iris.Labels[item.Label]] = 1
 	}
+	crossEntropy := tf32.B(CrossEntropy)
 	entropy := NewEntropyLayer(4, 8, 1, nil)
-	supervised := NewSupervisedLayer(2*8, 3, 1, tf32.Softmax, tf32.CrossEntropy)
+	supervised := NewSupervisedLayer(2*8, 3, 1, tf32.Softmax, crossEntropy)
 
 	// The stochastic gradient descent loop
 	for i := 0; i < 2048*1024; i++ {
@@ -383,8 +432,7 @@ func IRISExample() {
 			}
 			return true
 		})
-		copy(supervised.Targets.X, targets[index*3:index*3+3])
-		loss += supervised.Step(next.X)
+		loss += supervised.Step(next.X, targets[index*3:index*3+3])
 		end := time.Since(start)
 		fmt.Println(i, loss, end)
 
