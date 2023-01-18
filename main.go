@@ -90,10 +90,11 @@ func NewEntropyLayer(name string, inputSize, outputSize, batchSize int, eta floa
 		}
 	}
 
+	spherical := tf32.U(SphericalSoftmax)
 	// The neural network is the attention model from attention is all you need
 	x := tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1"))
 	l1 := tf32.Everett(x)
-	cost := tf32.Sum(tf32.Entropy(tf32.Softmax(tf32.T(tf32.Mul(tf32.Softmax(x), tf32.T(set.Get("w1")))))))
+	cost := tf32.Sum(tf32.Entropy(spherical(tf32.T(tf32.Mul(spherical(x), tf32.T(set.Get("w1")))))))
 
 	return &EntropyLayer{
 		Name:   name,
@@ -221,6 +222,36 @@ func CrossEntropy(k tf32.Continuation, node int, a, b *tf32.V, options ...map[st
 			}
 		}
 		index++
+	}
+	return false
+}
+
+// SphericalSoftmax is the spherical softmax function
+// https://arxiv.org/abs/1511.05042
+func SphericalSoftmax(k tf32.Continuation, node int, a *tf32.V, options ...map[string]interface{}) bool {
+	const E = 1e-8
+	c, size, width := tf32.NewV(a.S...), len(a.X), a.S[0]
+	values, sums, row := make([]float32, width), make([]float32, a.S[1]), 0
+	for i := 0; i < size; i += width {
+		sum := float32(0.0)
+		for j, ax := range a.X[i : i+width] {
+			values[j] = ax*ax + E
+			sum += values[j]
+		}
+		for _, cx := range values {
+			c.X = append(c.X, (cx+E)/sum)
+		}
+		sums[row] = sum
+		row++
+	}
+	if k(&c) {
+		return true
+	}
+	// (2 a (b^2 + c^2 + d^2 + 0.003))/(a^2 + b^2 + c^2 + d^2 + 0.004)^2
+	for i, d := range c.D {
+		ax, sum := a.X[i], sums[i/width]
+		//a.D[i] += d*(2*ax*(sum-(ax*ax+E)))/(sum*sum) - d*cx*2*ax/sum
+		a.D[i] += d * (2 * ax * (sum - (ax*ax + E))) / (sum * sum)
 	}
 	return false
 }
@@ -419,11 +450,11 @@ func IRISExample() {
 		targets[i*3+iris.Labels[item.Label]] = 1
 	}
 	crossEntropy := tf32.B(CrossEntropy)
-	entropy := NewEntropyLayer("iris", 4, 8, 1, Eta, nil)
-	supervised := NewSupervisedLayer("iris", 2*8, 3, 1, Eta, tf32.Softmax, crossEntropy)
+	entropy := NewEntropyLayer("iris", 4, 64, 1, Eta, nil)
+	supervised := NewSupervisedLayer("iris", 2*64, 3, 1, Eta, tf32.Softmax, crossEntropy)
 
 	// The stochastic gradient descent loop
-	for i := 0; i < 2048*1024; i++ {
+	for i := 0; i < 16*1024; i++ {
 		start := time.Now()
 		index := rnd.Intn(length)
 		// Step the model
