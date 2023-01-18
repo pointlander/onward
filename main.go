@@ -26,6 +26,8 @@ const (
 	B2 = 0.999
 	// Eta is the learning rate
 	Eta = .3
+	// CrossEntropyOffset is the cross entropy offset
+	CrossEntropyOffset = 1e-8
 )
 
 const (
@@ -192,9 +194,9 @@ func CrossEntropy(k tf32.Continuation, node int, a, b *tf32.V, options ...map[st
 		for j, ax := range av {
 			bx := bv[j]
 			if bx == 1 {
-				sum += log(ax + .000001)
+				sum += log(ax + CrossEntropyOffset)
 			} else {
-				sum += log(1 - ax + .000001)
+				sum += log(1 - ax + CrossEntropyOffset)
 			}
 		}
 		c.X = append(c.X, -sum)
@@ -208,11 +210,11 @@ func CrossEntropy(k tf32.Continuation, node int, a, b *tf32.V, options ...map[st
 		for j, ax := range av {
 			bx := bv[j]
 			if bx == 1 {
-				ad[j] -= d / (ax + .000001)
-				bd[j] -= log(ax+.000001) * d
+				ad[j] -= d / (ax + CrossEntropyOffset)
+				bd[j] -= log(ax+CrossEntropyOffset) * d
 			} else {
-				ad[j] += d / (1 - ax + .000001)
-				bd[j] -= log(1-ax+.000001) * d
+				ad[j] += d / (1 - ax + CrossEntropyOffset)
+				bd[j] -= log(1-ax+CrossEntropyOffset) * d
 			}
 		}
 		index++
