@@ -43,6 +43,7 @@ const (
 type EntropyLayer struct {
 	Name   string
 	Rnd    *rand.Rand
+	Eta    float32
 	Set    tf32.Set
 	Others tf32.Set
 	Input  *tf32.V
@@ -53,7 +54,7 @@ type EntropyLayer struct {
 }
 
 // NewEntropyLayer creates a new entropy layer
-func NewEntropyLayer(name string, inputSize, outputSize, batchSize int, weights []float32) *EntropyLayer {
+func NewEntropyLayer(name string, inputSize, outputSize, batchSize int, eta float32, weights []float32) *EntropyLayer {
 	rnd := rand.New(rand.NewSource(1))
 
 	others := tf32.NewSet()
@@ -97,6 +98,7 @@ func NewEntropyLayer(name string, inputSize, outputSize, batchSize int, weights 
 	return &EntropyLayer{
 		Name:   name,
 		Rnd:    rnd,
+		Eta:    eta,
 		Set:    set,
 		Others: others,
 		Input:  inputs,
@@ -109,7 +111,7 @@ func NewEntropyLayer(name string, inputSize, outputSize, batchSize int, weights 
 // Step steps the layer forward
 func (e *EntropyLayer) Step(in []float32) float32 {
 	e.I++
-	i := e.I
+	eta, i := e.Eta, e.I
 	copy(e.Input.X, in)
 	loss := tf32.Gradient(e.Cost).X[0]
 
@@ -124,7 +126,7 @@ func (e *EntropyLayer) Step(in []float32) float32 {
 			w.States[StateV][k] = v
 			mhat := m / (1 - b1)
 			vhat := v / (1 - b2)
-			e.Set.Weights[j].X[k] -= Eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
+			e.Set.Weights[j].X[k] -= eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
 		}
 	}
 
@@ -164,6 +166,7 @@ func (e *EntropyLayer) Save() {
 type SupervisedyLayer struct {
 	Name    string
 	Rnd     *rand.Rand
+	Eta     float32
 	Set     tf32.Set
 	Others  tf32.Set
 	Input   *tf32.V
@@ -223,7 +226,7 @@ func CrossEntropy(k tf32.Continuation, node int, a, b *tf32.V, options ...map[st
 }
 
 // NewEntropyLayer creates a new entropy layer
-func NewSupervisedLayer(name string, inputSize, outputSize, batchSize int,
+func NewSupervisedLayer(name string, inputSize, outputSize, batchSize int, eta float32,
 	activation func(a tf32.Meta, options ...map[string]interface{}) tf32.Meta,
 	loss func(a, b tf32.Meta, options ...map[string]interface{}) tf32.Meta) *SupervisedyLayer {
 	rnd := rand.New(rand.NewSource(1))
@@ -265,6 +268,7 @@ func NewSupervisedLayer(name string, inputSize, outputSize, batchSize int,
 	return &SupervisedyLayer{
 		Name:    name,
 		Rnd:     rnd,
+		Eta:     eta,
 		Set:     set,
 		Others:  others,
 		Input:   inputs,
@@ -278,7 +282,7 @@ func NewSupervisedLayer(name string, inputSize, outputSize, batchSize int,
 // Step steps the layer forward
 func (s *SupervisedyLayer) Step(in, targets []float32) float32 {
 	s.I++
-	i := s.I
+	eta, i := s.Eta, s.I
 	copy(s.Input.X, in)
 	copy(s.Targets.X, targets)
 	loss := tf32.Gradient(s.Cost).X[0]
@@ -294,7 +298,7 @@ func (s *SupervisedyLayer) Step(in, targets []float32) float32 {
 			w.States[StateV][k] = v
 			mhat := m / (1 - b1)
 			vhat := v / (1 - b2)
-			s.Set.Weights[j].X[k] -= Eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
+			s.Set.Weights[j].X[k] -= eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
 		}
 	}
 
@@ -334,8 +338,8 @@ func (s *SupervisedyLayer) Save() {
 func XORExample() {
 	inputs := []float32{-1, -1, -1, 1, 1, -1, 1, 1}
 	targets := []float32{-1, 1, 1, -1}
-	entropy := NewEntropyLayer("xor", 2, 4, 4, inputs)
-	supervised := NewSupervisedLayer("xor", 2*4, 1, 4, tf32.TanH, tf32.Quadratic)
+	entropy := NewEntropyLayer("xor", 2, 4, 4, Eta, inputs)
+	supervised := NewSupervisedLayer("xor", 2*4, 1, 4, Eta, tf32.TanH, tf32.Quadratic)
 
 	// The stochastic gradient descent loop
 	for i := 0; i < 64; i++ {
@@ -415,8 +419,8 @@ func IRISExample() {
 		targets[i*3+iris.Labels[item.Label]] = 1
 	}
 	crossEntropy := tf32.B(CrossEntropy)
-	entropy := NewEntropyLayer("iris", 4, 8, 1, nil)
-	supervised := NewSupervisedLayer("iris", 2*8, 3, 1, tf32.Softmax, crossEntropy)
+	entropy := NewEntropyLayer("iris", 4, 8, 1, Eta, nil)
+	supervised := NewSupervisedLayer("iris", 2*8, 3, 1, Eta, tf32.Softmax, crossEntropy)
 
 	// The stochastic gradient descent loop
 	for i := 0; i < 2048*1024; i++ {
