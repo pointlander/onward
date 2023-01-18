@@ -458,22 +458,19 @@ func IRISExample() {
 		start := time.Now()
 		index := rnd.Intn(length)
 		// Step the model
-		var loss float32
-		loss = entropy.Step(inputs[index*4 : index*4+4])
-		var next *tf32.V
+		loss := entropy.Step(inputs[index*4 : index*4+4])
 		entropy.L1(func(a *tf32.V) bool {
-			next = a
 			sum := float32(0.0)
-			for _, value := range next.X {
+			for _, value := range a.X {
 				sum += value * value
 			}
 			scale := float32(math.Sqrt(float64(sum)))
-			for i, value := range next.X {
-				next.X[i] = value / scale
+			for i, value := range a.X {
+				a.X[i] = value / scale
 			}
+			loss += supervised.Step(a.X, targets[index*3:index*3+3])
 			return true
 		})
-		loss += supervised.Step(next.X, targets[index*3:index*3+3])
 		end := time.Since(start)
 		fmt.Println(i, loss, end)
 
