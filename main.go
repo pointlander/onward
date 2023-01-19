@@ -229,7 +229,7 @@ func CrossEntropy(k tf32.Continuation, node int, a, b *tf32.V, options ...map[st
 // SphericalSoftmax is the spherical softmax function
 // https://arxiv.org/abs/1511.05042
 func SphericalSoftmax(k tf32.Continuation, node int, a *tf32.V, options ...map[string]interface{}) bool {
-	const E = 1e-8
+	const E = 1e-3
 	c, size, width := tf32.NewV(a.S...), len(a.X), a.S[0]
 	values, sums, row := make([]float32, width), make([]float32, a.S[1]), 0
 	for i := 0; i < size; i += width {
