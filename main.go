@@ -90,11 +90,11 @@ func NewEntropyLayer(name string, inputSize, outputSize, batchSize int, eta floa
 		}
 	}
 
-	spherical := tf32.U(SphericalSoftmax)
+	taylor := tf32.U(TaylorSoftmax)
 	// The neural network is the attention model from attention is all you need
 	x := tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1"))
 	l1 := tf32.Everett(x)
-	cost := tf32.Sum(tf32.Entropy(spherical(tf32.T(tf32.Mul(spherical(x), tf32.T(set.Get("w1")))))))
+	cost := tf32.Sum(tf32.Entropy(taylor(tf32.T(tf32.Mul(taylor(x), tf32.T(set.Get("w1")))))))
 
 	return &EntropyLayer{
 		Name:   name,
@@ -226,6 +226,53 @@ func CrossEntropy(k tf32.Continuation, node int, a, b *tf32.V, options ...map[st
 	return false
 }
 
+// TaylorEntropy computes the taylor entropy cost of two tensors
+func TaylorEntropy(k tf32.Continuation, node int, a, b *tf32.V, options ...map[string]interface{}) bool {
+	if len(a.S) != 2 || len(b.S) != 2 {
+		panic("tensor needs to have two dimensions")
+	}
+	width := a.S[0]
+	if width != b.S[0] || a.S[1] != b.S[1] {
+		panic("dimensions are not the same")
+	}
+	c, size := tf32.NewV(a.S[1]), len(a.X)
+
+	values, sums, row := make([]float32, width), make([]float32, a.S[1]), 0
+	for i := 0; i < size; i += width {
+		av, sum := a.X[i:i+width], float32(0.0)
+		for j, ax := range av {
+			values[j] = ax*ax/2 + ax + 1
+			sum += values[j]
+		}
+		sums[row] = sum
+		row++
+
+		total := float32(0.0)
+		for _, cx := range values {
+			total += log(cx / sum)
+		}
+		c.X = append(c.X, -total)
+	}
+	if k(&c) {
+		return true
+	}
+	index := 0
+	for i := 0; i < size; i += width {
+		av, bv, ad, d := a.X[i:i+width], b.X[i:i+width], a.D[i:i+width], c.D[index]
+		sum := sums[index/width]
+		for j, ax := range av {
+			bx := bv[j]
+			if bx == 1 {
+				ad[j] += d * ((1+ax)/sum - (1+ax)/(ax*ax/2+ax+1))
+			} else {
+				ad[j] += d * (1 + ax) / sum
+			}
+		}
+		index++
+	}
+	return false
+}
+
 // SphericalSoftmax is the spherical softmax function
 // https://arxiv.org/abs/1511.05042
 func SphericalSoftmax(k tf32.Continuation, node int, a *tf32.V, options ...map[string]interface{}) bool {
@@ -247,17 +294,43 @@ func SphericalSoftmax(k tf32.Continuation, node int, a *tf32.V, options ...map[s
 	if k(&c) {
 		return true
 	}
-	// (2 a (b^2 + c^2 + d^2 + 0.003))/(a^2 + b^2 + c^2 + d^2 + 0.004)^2
 	for i, d := range c.D {
 		ax, sum := a.X[i], sums[i/width]
-		//a.D[i] += d*(2*ax*(sum-(ax*ax+E)))/(sum*sum) - d*cx*2*ax/sum
 		a.D[i] += d * (2 * ax * (sum - (ax*ax + E))) / (sum * sum)
+	}
+	return false
+}
+
+// TaylorSoftmax is the taylor softmax function
+// https://arxiv.org/abs/1511.05042
+func TaylorSoftmax(k tf32.Continuation, node int, a *tf32.V, options ...map[string]interface{}) bool {
+	c, size, width := tf32.NewV(a.S...), len(a.X), a.S[0]
+	values, sums, row := make([]float32, width), make([]float32, a.S[1]), 0
+	for i := 0; i < size; i += width {
+		sum := float32(0.0)
+		for j, ax := range a.X[i : i+width] {
+			values[j] = ax*ax/2 + ax + 1
+			sum += values[j]
+		}
+		for _, cx := range values {
+			c.X = append(c.X, cx/sum)
+		}
+		sums[row] = sum
+		row++
+	}
+	if k(&c) {
+		return true
+	}
+	for i, d := range c.D {
+		ax, sum := a.X[i], sums[i/width]
+		a.D[i] += d * ((sum - (ax*ax/2 + ax + 1)) * (1 + ax)) / (sum * sum)
 	}
 	return false
 }
 
 // NewEntropyLayer creates a new entropy layer
 func NewSupervisedLayer(name string, inputSize, outputSize, batchSize int, eta float32,
+	integrated bool,
 	activation func(a tf32.Meta, options ...map[string]interface{}) tf32.Meta,
 	loss func(a, b tf32.Meta, options ...map[string]interface{}) tf32.Meta) *SupervisedyLayer {
 	rnd := rand.New(rand.NewSource(1))
@@ -295,6 +368,11 @@ func NewSupervisedLayer(name string, inputSize, outputSize, batchSize int, eta f
 
 	l1 := activation(tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1")))
 	cost := tf32.Sum(loss(l1, others.Get("targets")))
+	if integrated {
+		x := tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1"))
+		l1 = activation(x)
+		cost = tf32.Sum(loss(x, others.Get("targets")))
+	}
 
 	return &SupervisedyLayer{
 		Name:    name,
@@ -370,7 +448,7 @@ func XORExample() {
 	inputs := []float32{-1, -1, -1, 1, 1, -1, 1, 1}
 	targets := []float32{-1, 1, 1, -1}
 	entropy := NewEntropyLayer("xor", 2, 4, 4, Eta, inputs)
-	supervised := NewSupervisedLayer("xor", 2*4, 1, 4, Eta, tf32.TanH, tf32.Quadratic)
+	supervised := NewSupervisedLayer("xor", 2*4, 1, 4, Eta, false, tf32.TanH, tf32.Quadratic)
 
 	// The stochastic gradient descent loop
 	for i := 0; i < 64; i++ {
@@ -447,17 +525,18 @@ func IRISExample() {
 		inputs = append(inputs, float32(measures[0]), float32(measures[1]), float32(measures[2]), float32(measures[3]))
 		targets[i*3+iris.Labels[item.Label]] = 1
 	}
-	spherical := tf32.U(SphericalSoftmax)
-	crossEntropy := tf32.B(CrossEntropy)
+	taylor := tf32.U(TaylorSoftmax)
+	taylorEntropy := tf32.B(TaylorEntropy)
 	entropy := NewEntropyLayer("iris", 4, 64, length, Eta, nil)
-	supervised := NewSupervisedLayer("iris", 2*64, 3, length, Eta, spherical, crossEntropy)
+	supervised := NewSupervisedLayer("iris", 2*64, 3, length, Eta, true, taylor, taylorEntropy)
 
 	// The stochastic gradient descent loop
-	for i := 0; i < 1024; i++ {
+	for i := 0; i < 20*1024; i++ {
 		start := time.Now()
 
 		// Step the model
 		loss := entropy.Step(inputs)
+		var loss1 float32
 		entropy.L1(func(a *tf32.V) bool {
 			for j := 0; j < length; j++ {
 				x, sum := a.X[j*4:j*4+4], float32(0.0)
@@ -469,11 +548,11 @@ func IRISExample() {
 					a.X[i] = value / scale
 				}
 			}
-			loss += supervised.Step(a.X, targets)
+			loss1 = supervised.Step(a.X, targets)
 			return true
 		})
 		end := time.Since(start)
-		fmt.Println(i, loss, end)
+		fmt.Println(i, loss, loss1, end)
 
 		if math.IsNaN(float64(loss)) {
 			fmt.Println(loss)
