@@ -54,7 +54,8 @@ type EntropyLayer struct {
 }
 
 // NewEntropyLayer creates a new entropy layer
-func NewEntropyLayer(name string, inputSize, outputSize, batchSize int, eta float32, weights []float32) *EntropyLayer {
+func NewEntropyLayer(name string, inputSize, outputSize, batchSize int, eta float32, weights []float32,
+	activation func(a tf32.Meta, options ...map[string]interface{}) tf32.Meta) *EntropyLayer {
 	rnd := rand.New(rand.NewSource(1))
 
 	others := tf32.NewSet()
@@ -90,11 +91,10 @@ func NewEntropyLayer(name string, inputSize, outputSize, batchSize int, eta floa
 		}
 	}
 
-	spherical := tf32.U(SphericalSoftmax)
 	// The neural network is the attention model from attention is all you need
 	x := tf32.Add(tf32.Mul(set.Get("w1"), others.Get("inputs")), set.Get("b1"))
 	l1 := tf32.Everett(x)
-	cost := tf32.Sum(tf32.Entropy(spherical(tf32.T(tf32.Mul(spherical(x), tf32.T(set.Get("w1")))))))
+	cost := tf32.Sum(tf32.Entropy(activation(tf32.T(tf32.Mul(activation(x), tf32.T(set.Get("w1")))))))
 
 	return &EntropyLayer{
 		Name:   name,
@@ -369,7 +369,7 @@ func (s *SupervisedyLayer) Save() {
 func XORExample() {
 	inputs := []float32{-1, -1, -1, 1, 1, -1, 1, 1}
 	targets := []float32{-1, 1, 1, -1}
-	entropy := NewEntropyLayer("xor", 2, 4, 4, Eta, inputs)
+	entropy := NewEntropyLayer("xor", 2, 4, 4, Eta, inputs, tf32.Softmax)
 	supervised := NewSupervisedLayer("xor", 2*4, 1, 4, Eta, tf32.TanH, tf32.Quadratic)
 
 	// The stochastic gradient descent loop
@@ -449,7 +449,7 @@ func IRISExample() {
 	}
 	spherical := tf32.U(SphericalSoftmax)
 	crossEntropy := tf32.B(CrossEntropy)
-	entropy := NewEntropyLayer("iris", 4, 64, length, Eta, nil)
+	entropy := NewEntropyLayer("iris", 4, 64, length, Eta, nil, spherical)
 	supervised := NewSupervisedLayer("iris", 2*64, 3, length, Eta, spherical, crossEntropy)
 
 	// The stochastic gradient descent loop
